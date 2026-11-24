@@ -31,6 +31,7 @@ class Observation:
     actors: list = field(default_factory=list)   # [(name, pose 4x4, size, velocity)]
     route: ReferencePath | None = None
     depth: np.ndarray | None = None
+    ref_speed: float | None = None                # logged ego speed at t (privileged)
 
 
 class Policy:
@@ -47,7 +48,7 @@ class Policy:
 class ExpertPolicy(Policy):
     name = "expert"
 
-    def __init__(self, target_speed: float = 8.0, lookahead: float = 8.0, wheelbase: float = 2.8,
+    def __init__(self, target_speed: float | None = None, lookahead: float = 8.0, wheelbase: float = 2.8,
                  time_headway: float = 1.5, min_gap: float = 3.0, a_max: float = 2.0, b_comf: float = 3.0):
         self.v0, self.L, self.wb = target_speed, lookahead, wheelbase
         self.T, self.s0, self.a, self.b = time_headway, min_gap, a_max, b_comf
@@ -71,7 +72,8 @@ class ExpertPolicy(Policy):
                 g = lon - (4.5 + size[0]) / 2
                 if g < gap:
                     gap, dv = g, e.v - float(np.dot(vel, ego_pose[:3, 0]))
-        acc = self.a * (1 - (e.v / self.v0) ** 4)
+        v0 = self.v0 if self.v0 is not None else max(obs.ref_speed if obs.ref_speed is not None else 8.0, 3.0)
+        acc = self.a * (1 - (e.v / v0) ** 4)
         if np.isfinite(gap):
             s_star = self.s0 + max(0.0, e.v * self.T + e.v * dv / (2 * np.sqrt(self.a * self.b)))
             acc -= self.a * (s_star / max(gap, 0.1)) ** 2

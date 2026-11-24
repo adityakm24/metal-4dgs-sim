@@ -100,6 +100,7 @@ class ClosedLoopSim:
         steps: list[StepRecord] = []
         prev_cam, prev_t, prev_img = None, None, None
         collided, offroad, min_ttc_all, warp_errs = None, False, np.inf, []
+        rear_hits: set[str] = set()
         t = t0
         while t <= t1 + 1e-9:
             ego_pose = state.pose()
@@ -124,8 +125,15 @@ class ClosedLoopSim:
                 pose, vel = n.track.pose(t), n.track.velocity(t)
                 actors.append((n.name, pose, n.size, vel))
                 if obb_overlap(ego_pose, ego_size, pose, n.size):
-                    events.append(f"collision:{n.name}")
-                    collided = collided or n.name
+                    # nuPlan-style fault: a non-reactive replayed agent hitting the ego from behind is not the
+                    # policy's failure; anything at the ego's front/side-front is.
+                    rel = np.linalg.inv(ego_pose) @ pose
+                    if rel[0, 3] > -ego_size[0] / 4:
+                        events.append(f"collision:{n.name}")
+                        collided = collided or n.name
+                    else:
+                        events.append(f"rear_collision_nonreactive:{n.name}")
+                        rear_hits.add(n.name)
                 step_ttc = min(step_ttc, time_to_collision(ego_pose, ego_size, state.v, pose, n.size, vel))
             s_route, lat_err, _ = self.route.project([state.x, state.y])
             if abs(lat_err) > self.offroad:
@@ -134,7 +142,8 @@ class ClosedLoopSim:
             min_ttc_all = min(min_ttc_all, step_ttc)
             if measure_warp and prev_img is not None and out.flow is not None:
                 warp_errs.append(warping_error(img, prev_img, np.array(out.flow), np.array(out.alpha) > 0.5))
-            obs = Observation(img, state.v, t, state, actors, self.route, np.array(out.depth))
+            ref_speed = float(np.linalg.norm(scene.ego.track.velocity(t)[:2]))
+            obs = Observation(img, state.v, t, state, actors, self.route, np.array(out.depth), ref_speed)
             tic = time.perf_counter()
             action = self.policy.act(obs)
             lat["policy"] = (time.perf_counter() - tic) * 1e3
@@ -149,6 +158,9 @@ class ClosedLoopSim:
                 on_step(rec, frames, scene, self)
             if collided and stop_on_collision:
                 break
+            if s_route >= self.route.length - 0.5:     # reached the end of the logged route
+                rec.events.append("route_complete")
+                break
             prev_cam, prev_t, prev_img = cam, t, img
             state = self.dyn.step(state, action, self.dt)
             state.z = float(scene.ego.track.position(t + self.dt)[2])
@@ -158,6 +170,7 @@ class ClosedLoopSim:
         lat_all = [s.latency_ms for s in steps[1:]] or [s.latency_ms for s in steps]
         metrics = {
             "collision": bool(collided), "collided_with": collided or None, "offroad": offroad,
+            "nonreactive_rear_hits": sorted(rear_hits),
             "min_ttc": None if not np.isfinite(min_ttc_all) else float(min_ttc_all),
             "max_lateral_error": float(max(abs(s.lateral_error) for s in steps)),
             "route_completion": float(np.clip((s_end - s_start) / max(self.route.length - s_start, 1e-6), 0, 1)),

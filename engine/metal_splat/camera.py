@@ -17,6 +17,12 @@ class Camera:
     cy: float
     c2w: np.ndarray  # (4,4) camera-to-world, OpenCV axes
 
+    def __post_init__(self):
+        # plain Python scalars: numpy scalars would hijack arithmetic with MLX arrays
+        self.width, self.height = int(self.width), int(self.height)
+        self.fx, self.fy, self.cx, self.cy = float(self.fx), float(self.fy), float(self.cx), float(self.cy)
+        self.c2w = np.asarray(self.c2w, dtype=np.float64)
+
     @property
     def w2c(self) -> np.ndarray:
         return invert_se3(self.c2w)
