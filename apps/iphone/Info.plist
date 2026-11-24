@@ -6,6 +6,12 @@
 	<string>M4DGS Capture</string>
 	<key>NSCameraUsageDescription</key>
 	<string>M4DGS Capture uses the camera with ARKit to record posed images (and LiDAR depth when available) for 3D/4D Gaussian Splatting reconstruction.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>M4DGS Capture finds M4DGS Studio on your Mac over the local network and streams captures to it while you record.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_m4dgs-live._tcp</string>
+	</array>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arkit</string>

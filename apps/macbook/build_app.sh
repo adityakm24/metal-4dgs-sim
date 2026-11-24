@@ -26,6 +26,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSLocalNetworkUsageDescription</key><string>M4DGS Studio receives captures streamed from the M4DGS Capture iPhone app over your local network.</string>
+  <key>NSBonjourServices</key><array><string>_m4dgs-live._tcp</string></array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

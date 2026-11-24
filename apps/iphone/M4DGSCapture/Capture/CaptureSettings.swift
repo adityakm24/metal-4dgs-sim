@@ -9,6 +9,8 @@ enum SettingsKey {
     static let halfResolution = "image.halfResolution"
     static let autoFocus = "camera.autoFocus"
     static let showFeaturePoints = "preview.showFeaturePoints"
+    static let liveEnabled = "live.enabled"                    // stream keyframes to a Mac (docs/formats.md §6)
+    static let liveMacName = "live.macName"                    // Bonjour instance name of the selected Mac
 }
 
 enum SettingsDefault {
@@ -19,6 +21,8 @@ enum SettingsDefault {
     static let halfResolution = false
     static let autoFocus = true
     static let showFeaturePoints = true
+    static let liveEnabled = false
+    static let liveMacName = ""
 
     static var registration: [String: Any] {
         [SettingsKey.minInterval: minInterval,
@@ -27,7 +31,9 @@ enum SettingsDefault {
          SettingsKey.maxAngularSpeed: maxAngularSpeed,
          SettingsKey.halfResolution: halfResolution,
          SettingsKey.autoFocus: autoFocus,
-         SettingsKey.showFeaturePoints: showFeaturePoints]
+         SettingsKey.showFeaturePoints: showFeaturePoints,
+         SettingsKey.liveEnabled: liveEnabled,
+         SettingsKey.liveMacName: liveMacName]
     }
 }
 
@@ -47,6 +53,18 @@ struct CaptureSettings: Sendable, Equatable {
         s.halfResolution = d.bool(forKey: SettingsKey.halfResolution)
         s.autoFocus = d.bool(forKey: SettingsKey.autoFocus)
         return s
+    }
+}
+
+/// "Stream to Mac" settings.
+struct LiveSettings: Sendable, Equatable {
+    var enabled = false
+    var macName = ""
+
+    static func load(from d: UserDefaults = .standard) -> LiveSettings {
+        d.register(defaults: SettingsDefault.registration)
+        return LiveSettings(enabled: d.bool(forKey: SettingsKey.liveEnabled),
+                            macName: d.string(forKey: SettingsKey.liveMacName) ?? "")
     }
 }
 

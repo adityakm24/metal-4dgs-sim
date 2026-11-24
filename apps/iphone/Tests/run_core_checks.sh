@@ -1,7 +1,8 @@
 #!/bin/sh
-# Compiles the platform-independent capture-format code (M4DGSCapture/Core) together with
-# CoreChecks/main.swift for macOS, runs it, then (if available) re-reads the sample files with
-# Python + OpenCV the same way the capture loader does.
+# Compiles the platform-independent capture-format and live-link code (M4DGSCapture/Core) together with
+# CoreChecks/*.swift for macOS, runs it, re-parses the live-link wire bytes with an independent Python decoder
+# (live_link_decode_check.py, stdlib only), then (if available) re-reads the sample files with Python + OpenCV
+# the same way the capture loader does.
 #
 #   apps/iphone/Tests/run_core_checks.sh [python]
 set -eu
@@ -10,8 +11,15 @@ CORE="$HERE/../M4DGSCapture/Core"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/m4dgs_core_checks.XXXXXX")"
 PY="${1:-python3}"
 
-xcrun swiftc -O -swift-version 6 -o "$WORK/core_checks" "$CORE"/*.swift "$HERE/CoreChecks/main.swift"
+xcrun swiftc -O -swift-version 6 -o "$WORK/core_checks" "$CORE"/*.swift "$HERE"/CoreChecks/*.swift
 "$WORK/core_checks" "$WORK/sample"
+
+# Independent (pure-Python, stdlib only) decode of the live-link bytes produced by the Swift encoder.
+if "$PY" -c "import sys" 2>/dev/null; then
+  "$PY" "$HERE/live_link_decode_check.py" "$WORK/sample/live"
+else
+  echo "python not found ($PY); skipped live-link decoder cross-check"
+fi
 
 if "$PY" -c "import cv2, numpy" 2>/dev/null; then
   "$PY" - "$WORK/sample" <<'EOF'

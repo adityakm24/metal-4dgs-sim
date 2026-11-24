@@ -208,6 +208,9 @@ do {
     check(lines.last == "-0.500000 0.250000 0.000001", "ply row: \(lines.last ?? "")")
 }
 
+// MARK: - Live link wire format (LiveLinkChecks.swift)
+try runLiveLinkChecks(outDir: outDir)
+
 if failures == 0 {
     print("core checks: all passed (samples in \(outDir.path))")
     exit(0)

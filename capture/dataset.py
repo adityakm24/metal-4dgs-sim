@@ -139,7 +139,7 @@ def load_log(root: str | Path) -> Dataset:
 
 
 def load_any(path: str | Path, **kw) -> Dataset:
-    """Auto-detect: m4dgs log, iPhone ARKit capture (dir or .zip), or nuScenes root."""
+    """Auto-detect: m4dgs log, iPhone ARKit capture (dir or .zip), KITTI raw drive, or nuScenes root."""
     path = Path(path)
     if path.suffix == ".zip":
         from .arkit import load_arkit_capture
@@ -149,6 +149,9 @@ def load_any(path: str | Path, **kw) -> Dataset:
     if (path / "capture.json").exists() or any(path.glob("*/capture.json")):
         from .arkit import load_arkit_capture
         return load_arkit_capture(path, **kw)
+    if (path / "oxts").exists() or any(path.glob("*/*_sync/oxts")) or any(path.glob("*_sync/oxts")):
+        from .kitti import load_kitti
+        return load_kitti(path, **kw)
     if (path / "v1.0-mini").exists() or (path / "v1.0-trainval").exists():
         from .nuscenes import load_nuscenes
         return load_nuscenes(path, **kw)

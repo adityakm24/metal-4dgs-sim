@@ -69,6 +69,25 @@ final class CaptureEngine: NSObject, ARSessionDelegate, @unchecked Sendable {
         session.pause()
     }
 
+    /// Image size the writer will store (and the LiDAR depth size) for the live-link `hello`, taken from the
+    /// session's current frame; falls back to the configured video format before the first frame arrives.
+    func streamGeometry(halfResolution: Bool) -> (image: PixelSize, depth: PixelSize?) {
+        var image: PixelSize
+        var depth: PixelSize?
+        if let frame = session.currentFrame {
+            image = PixelSize(width: CVPixelBufferGetWidth(frame.capturedImage), height: CVPixelBufferGetHeight(frame.capturedImage))
+            if let map = frame.sceneDepth?.depthMap {
+                depth = PixelSize(width: CVPixelBufferGetWidth(map), height: CVPixelBufferGetHeight(map))
+            }
+        } else {
+            let r = (session.configuration as? ARWorldTrackingConfiguration)?.videoFormat.imageResolution
+                ?? ARWorldTrackingConfiguration().videoFormat.imageResolution
+            image = PixelSize(width: Int(r.width.rounded()), height: Int(r.height.rounded()))
+        }
+        if halfResolution { image = image.scaled(by: 0.5) }
+        return (image, depth)
+    }
+
     func startRecording(writer: CaptureWriter, settings: CaptureSettings) {
         queue.async {
             self.selector.settings = settings.keyframe

@@ -12,6 +12,8 @@ checkpoints (`*.safetensors`, [docs/formats.md](../../docs/formats.md) §3) and 
   `<scene>.edits.json` for the Python stack.
 * Rollout playback with speed / steer / accel, events (collisions highlighted), metrics and per-stage latency.
 * Headless CLI: render a frame to PNG and benchmark GPU time.
+* **Live Capture**: receives a capture streamed from the iPhone app over Wi-Fi (§6 live link), shows it
+  arriving, and reconstructs it with the Python pipeline in one click (see [Live capture](#live-capture-iphone--mac)).
 
 ## Build & run
 
@@ -52,6 +54,80 @@ Shaders are embedded as a Swift string (`Sources/M4DGSRender/Shaders.swift`) and
 | `--no-edits`, `--edits file` | ignore the sidecar / use another one |
 | `--perturb "actor_1:lateral_offset=3.5m,t=1.0s;…"` | apply edits from perturbation strings (same syntax as `eval/closed_loop`) |
 | `--save-edits` | with `--perturb`: write the result as `<scene>.edits.json` |
+
+## Live capture (iPhone → Mac)
+
+The Mac side of the live link in [docs/formats.md](../../docs/formats.md) §6. **Live → Live Capture…** (⌘L, or the
+toolbar button; `--live` opens it at launch) starts an `NWListener` that advertises Bonjour `_m4dgs-live._tcp` under
+this Mac's name. In M4DGS Capture on the phone, pick the Mac and record. The panel shows:
+
+* listening state, port and Bonjour name (the switch stops/starts the receiver), and the captures folder,
+* the connected device (`hello`), a live thumbnail of the latest JPEG, frames / bytes received, and a top-down
+  plot of the camera centres so far (ARKit x → right, z ↓, orange arrow = current heading, scale bar in metres),
+* finished captures (plus **Add Folder…** for any existing capture directory) and **Reconstruct**.
+
+Each connection is one capture, written to `<captures folder>/<capture_name>/` exactly as §2 while frames
+arrive (JPEG/PNG bytes verbatim, paths from the frame header). The Mac replies `status` after every frame and
+`saved` after `end` (`capture.json` written verbatim + `points.ply`). `cancel` deletes the directory; a dropped
+connection leaves `capture.partial.json` (`{"format":"m4dgs-arkit-capture-partial","hello":…,"frames":[…]}`,
+also refreshed every 10 frames) so the files can be inspected — it is not loadable as a capture. An existing
+directory of the same name is never overwritten (`_1`, `_2`, … suffix; `saved.path` says where it went).
+
+Input is treated as untrusted: `capture_name` must be a plain directory name (no `/`, `\`, `..`, leading `.`,
+control characters, ≤128 chars); frame paths must be exactly `images|depth|confidence/<name>` with
+`[A-Za-z0-9_.-]` names (anything else — `..`, absolute paths, extra components, unicode slashes — is rejected,
+not rewritten, and the connection is closed); the same check applies to paths inside the final `capture.json`.
+Headers are capped at 32 MiB, payloads at 512 MiB, a capture at 100k frames / 64 GiB; the three `*_bytes`
+must add up to `payload_len`; bad magic is detected from the first 4 bytes.
+
+**Reconstruct** runs, from the repo root,
+`<repo>/.venv/bin/python <repo>/scripts/train_4dgs.py --data_dir <capture> --iterations N --output <repo>/checkpoints/<capture_name>.safetensors`
+(N defaults to 7000), streams stdout/stderr into the log view, shows progress / loss / PSNR / Gaussian count parsed
+from `[train] it …` lines, **Cancel** sends SIGTERM (SIGKILL after 5 s), and on success opens the checkpoint in
+the viewer.
+
+**Settings** (⌘,), stored in UserDefaults (domain `dev.m4dgs.studio`, shared by the .app and the bare binary;
+empty = default): *repo root* — default: nearest ancestor of the executable, else of the working directory,
+containing `scripts/train_4dgs.py`; *captures folder* — default `<repo>/data/live`, or `~/Documents/M4DGS
+Captures` without a repo; *iterations*. Any of them can be overridden for one run with Cocoa argument syntax,
+e.g. `open "build/M4DGS Studio.app" --args --live -capturesFolder /tmp/live`.
+
+The first time the .app listens, macOS asks to allow **local network** access (and, if the application firewall
+is on, incoming connections) — allow both, or the phone will not see the Mac. `build_app.sh` adds
+`NSLocalNetworkUsageDescription` / `NSBonjourServices` to the Info.plist.
+
+### Headless receiver / reconstruction
+
+```bash
+.build/debug/M4DGSStudio --receive [--out DIR] [--once] [--port P] [--name "Bonjour name"]
+.build/debug/M4DGSStudio --reconstruct <capture dir> [--iterations N] [--output ckpt.safetensors] [--repo DIR]
+```
+
+`--receive` logs every event and prints `LISTENING_PORT=…` / `SAVED_CAPTURE=…`; `--once` exits after the first
+connection ends (0 if it was saved). Ctrl-C closes open connections (leaving `capture.partial.json`).
+`--reconstruct` is the same job the Reconstruct button runs; it prints `CHECKPOINT=…` on success.
+
+### Testing without a phone: `Tools/fake_iphone_stream.py`
+
+```bash
+.build/debug/M4DGSStudio --receive --out /tmp/live --once &
+../../.venv/bin/python Tools/fake_iphone_stream.py                  # Bonjour discovery (dns-sd -B / -L), 30 synthetic frames
+../../.venv/bin/python Tools/fake_iphone_stream.py --host 127.0.0.1 --port 50123 --save-local /tmp/phone_copy/cap
+../../.venv/bin/python Tools/fake_iphone_stream.py --replay ../../data/iphone/capture_20261124_101500
+```
+
+Without `--replay` it synthesizes an ARKit capture from `data/sample_scene` (`--frames`, default 30): JPEG q90
+images, poses converted from sim/OpenCV back to ARKit (`ARKIT_WORLD_TO_SIM.T @ c2w_sim @ ARKIT_CAM_TO_CV`, the
+inverse of `capture/arkit.py`), 256-wide 16-bit depth + confidence PNGs and a `points.ply` (20k points of
+`points.npy`). Writes are split into random chunks of ≤ `--chunk-max` bytes that straddle message boundaries.
+`--drop-after K` / `--cancel-after K` exercise the partial / cancel paths; `--save-local` writes the phone's
+copy so it can be `diff -r`'d against the received directory. Exit status 0 iff `saved` arrived and every
+frame got a `status`.
+
+Verified on this Mac (M4): the received directory is byte-identical to the sender's local copy;
+`load_arkit_capture` reads 30 frames and every `camera_to_world` equals the `log.json` source exactly; a
+300-iteration `--reconstruct` (≈17 s, held-out PSNR 20.8 dB) produced a checkpoint that `--render` loads and
+renders. Not yet verified with the real iPhone app over Wi-Fi.
 
 ## Controls
 
@@ -148,6 +224,8 @@ Sources/M4DGSCore/      pure Swift, unit-tested
   TrackEditor.swift     TrackEdit + resampling editor, perturbation-string parser
   Rollout.swift         rollout log parsing
   Overlays.swift        line-segment builders (boxes, tracks, frustum)
+  LiveLink.swift        §6 wire codec (incremental decoder, limits), path sanitizers, train-log parser
+  LiveCaptureSession.swift  receiver state machine: writes the §2 directory, status/saved replies, cancel, partial
 Sources/M4DGSRender/
   Shaders.swift         Metal source (preprocess, radix sort, raster, lines)
   Renderer.swift        SplatRenderer: buffers, pipelines, encoding, benchmark, readback
@@ -159,10 +237,18 @@ Sources/M4DGSStudio/
   MetalViewport.swift   MTKView + input handling + per-frame render / GPU timing
   Views.swift           sidebar (nodes, editor), timeline, HUD, inspector (view options, rollout panel)
   Headless.swift        --render / --bench CLI
+  HeadlessLive.swift    --receive / --reconstruct CLI
+  LiveReceiver.swift    NWListener + Bonjour, one LiveCaptureSession per TCP connection
+  LiveCaptureModel.swift, LiveCaptureView.swift   Live Capture window + Settings
+  ReconstructJob.swift  train_4dgs.py child process (line streaming, progress, cancel)
+  StudioSettings.swift  repo root / captures folder / iterations (UserDefaults + auto-detection)
 Tests/                  XCTest: safetensors round-trip, slerp, track clamping, SH, 4D eval, camera
                         orientation, edits (axes, time remap, cut-in, field preservation), rollout parsing,
-                        GPU sort order, single-Gaussian projection, compositing, temporal opacity / visible_range
+                        GPU sort order, single-Gaussian projection, compositing, temporal opacity / visible_range,
+                        live link (wire layout, round trip, split-packet reassembly, bad magic / oversize,
+                        malicious paths, full capture / drop / cancel / duplicate name, train-log parsing)
 Tools/make_test_scene.py  synthetic z-up road scene + rollout (numpy only)
+Tools/fake_iphone_stream.py  live-link sender stand-in (numpy + opencv)
 build_app.sh            wraps the binary into "M4DGS Studio.app" (Info.plist, ad-hoc signed)
 ```
 

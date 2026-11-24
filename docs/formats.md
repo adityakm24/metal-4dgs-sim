@@ -171,3 +171,38 @@ All poses in the sim conventions of §1 (z-up world, OpenCV cameras).
   "background_color": [r,g,b]                                  // optional
 }
 ```
+
+## 6. Live link (`apps/iphone` ⇄ `apps/macbook`, Wi-Fi)
+
+The capture app streams keyframes to M4DGS Studio while recording. The Mac re-assembles **exactly the §2 capture
+directory**, so everything downstream (`train_4dgs.py`) is unchanged. The phone still writes its local copy as well.
+
+**Discovery / transport.** The Mac app advertises a Bonjour service `_m4dgs-live._tcp` (instance name = the Mac's
+name) with an `NWListener`; the phone browses with `NWBrowser`, the user picks a Mac, and it opens one TCP connection
+per capture. iOS needs `NSLocalNetworkUsageDescription` and `NSBonjourServices = ["_m4dgs-live._tcp"]`.
+
+**Framing.** Every message, both directions:
+
+```text
+offset 0   4 bytes  magic "M4DG"
+offset 4   1 byte   type
+offset 5   3 bytes  reserved (0)
+offset 8   uint32   header_len  (big-endian)
+offset 12  uint32   payload_len (big-endian)
+offset 16  header_len bytes   UTF-8 JSON header
+           payload_len bytes  binary payload
+```
+
+| type | dir | header | payload |
+| --- | --- | --- | --- |
+| 1 `hello` | phone→Mac | `{"protocol":1,"capture_name":"capture_YYYYMMDD_HHMMSS","device_model","system_version","image_width","image_height","depth_width","depth_height","has_lidar"}` | — |
+| 2 `frame` | phone→Mac | the §2 frame object (`index`, `timestamp`, `image`, `depth`, `confidence`, `camera_to_world`, `intrinsics`, `tracking_state`, `exposure_duration`, `motion_blur_score`) plus `"image_bytes"`, `"depth_bytes"`, `"confidence_bytes"` (0 when absent) | JPEG ‖ depth PNG ‖ confidence PNG, concatenated in that order — byte-identical to the files written locally |
+| 3 `points` | phone→Mac | `{"count": n}` | the `points.ply` file bytes |
+| 4 `end` | phone→Mac | the complete `capture.json` document | — |
+| 5 `status` | Mac→phone | `{"frames_received": n, "bytes_received": b}` (after every frame) | — |
+| 6 `cancel` | phone→Mac | `{}` — recording discarded; Mac deletes the partial directory | — |
+| 7 `saved` | Mac→phone | `{"path": "<absolute path on the Mac>", "frames": n}` after `end` is written | — |
+
+The Mac writes files to `<captures folder>/<capture_name>/` as frames arrive (paths taken from the frame header) and
+writes `capture.json` + `points.ply` on `end`. A connection that drops before `end` leaves the directory with a
+`capture.partial.json` (hello + frames so far) so it can still be inspected; it is not loadable as a capture.

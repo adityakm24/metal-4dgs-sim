@@ -17,7 +17,7 @@ struct CapturesListView: View {
             }
             ForEach(store.items) { item in
                 row(item)
-                    .swipeActions(edge: .trailing) {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { pendingDelete = item } label: { Label("Delete", systemImage: "trash") }
                     }
                     .swipeActions(edge: .leading) {

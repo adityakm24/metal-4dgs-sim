@@ -4,6 +4,7 @@ import M4DGSRender
 
 struct ContentView: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         NavigationSplitView {
@@ -28,12 +29,17 @@ struct ContentView: View {
             InspectorView(model: model).inspectorColumnWidth(min: 260, ideal: 310, max: 440)
         }
         .navigationTitle(model.title)
+        .onAppear {
+            if CommandLine.arguments.contains("--live") { openWindow(id: LiveCaptureWindow.id) }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button { model.openScenePanel() } label: { Label("Open Scene", systemImage: "cube.transparent") }
                     .help("Open a scene checkpoint (⌘O)")
                 Button { model.openRolloutPanel() } label: { Label("Open Rollout", systemImage: "chart.xyaxis.line") }
                     .help("Open a rollout log (⇧⌘O)")
+                Button { openWindow(id: LiveCaptureWindow.id) } label: { Label("Live Capture", systemImage: "iphone.radiowaves.left.and.right") }
+                    .help("Receive a capture streamed from the iPhone app (⌘L)")
             }
             ToolbarItem(placement: .principal) {
                 Picker("Camera", selection: Binding(get: { model.cameraMode }, set: { m in

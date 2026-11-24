@@ -4,6 +4,8 @@ struct CaptureScreen: View {
     @State private var controller = CaptureController()
     @State private var sheet: Sheet?
     @AppStorage(SettingsKey.showFeaturePoints) private var showFeaturePoints = SettingsDefault.showFeaturePoints
+    @AppStorage(SettingsKey.liveEnabled) private var liveEnabled = SettingsDefault.liveEnabled
+    @AppStorage(SettingsKey.liveMacName) private var liveMacName = SettingsDefault.liveMacName
     @Environment(\.scenePhase) private var scenePhase
 
     enum Sheet: String, Identifiable {
@@ -17,7 +19,8 @@ struct CaptureScreen: View {
                 ARPreview(session: session, showFeaturePoints: showFeaturePoints)
                     .ignoresSafeArea()
                 VStack(spacing: 8) {
-                    HUDView(status: controller.status, isRecording: controller.isRecording, hasLiDAR: controller.hasLiDAR)
+                    HUDView(status: controller.status, isRecording: controller.isRecording, hasLiDAR: controller.hasLiDAR,
+                            live: liveLine)
                     if let message = controller.message {
                         MessageBanner(text: message) { controller.message = nil }
                     }
@@ -42,14 +45,21 @@ struct CaptureScreen: View {
             NavigationStack {
                 switch which {
                 case .captures: CapturesListView()
-                case .settings: SettingsView(hasLiDAR: controller.hasLiDAR, arSupported: controller.isSupported)
+                case .settings: SettingsView(hasLiDAR: controller.hasLiDAR, arSupported: controller.isSupported,
+                                             browser: controller.browser)
                 }
             }
         }
         .onChange(of: sheet) { _, newValue in
             if newValue != nil { controller.pause() }
         }
-        .onAppear { controller.resume() }
+        .onAppear {
+            controller.resume()
+            if liveEnabled { controller.browser.start() }
+        }
+        .onChange(of: liveEnabled) { _, on in
+            if on { controller.browser.start() } else { controller.browser.stop() }
+        }
         .onDisappear { controller.pause() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -62,6 +72,18 @@ struct CaptureScreen: View {
                 break
             }
         }
+    }
+
+    /// Live-link HUD line: the stream's state during/after a streamed recording, else Mac discovery state.
+    private var liveLine: LiveHUDLine? {
+        if let s = controller.liveStatus, liveEnabled || !s.phase.isTerminal {
+            return LiveHUDLine(text: s.hudText, severity: s.severity)
+        }
+        guard liveEnabled else { return nil }
+        let text = controller.browser.statusLine(selected: liveMacName)
+        let ready = !liveMacName.isEmpty && controller.browser.macs.contains(liveMacName)
+        let bad = controller.browser.state == .denied
+        return LiveHUDLine(text: text, severity: bad ? .error : (ready ? .good : .info))
     }
 
     private var controls: some View {
@@ -102,10 +124,16 @@ struct CaptureScreen: View {
     }
 }
 
+struct LiveHUDLine: Equatable {
+    var text: String
+    var severity: LiveStreamSnapshot.Severity
+}
+
 struct HUDView: View {
     let status: EngineStatus
     let isRecording: Bool
     let hasLiDAR: Bool
+    var live: LiveHUDLine?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -138,6 +166,13 @@ struct HUDView: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.yellow)
+            }
+            if let live {
+                Label(live.text, systemImage: "wifi")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Self.color(live.severity))
+                    .lineLimit(3)
+                    .accessibilityLabel("Live link: \(live.text)")
             }
         }
         .padding(12)
@@ -185,6 +220,15 @@ struct HUDView: View {
         case .motionBlur: return "rejected (motion blur)"
         case .tooSoon: return "waiting (interval)"
         case .tooClose: return "waiting (move more)"
+        }
+    }
+
+    static func color(_ s: LiveStreamSnapshot.Severity) -> Color {
+        switch s {
+        case .info: return .secondary
+        case .good: return .green
+        case .warning: return .yellow
+        case .error: return .orange
         }
     }
 
