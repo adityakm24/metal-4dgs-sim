@@ -20,7 +20,7 @@ apps/iphone  ──(ARKit capture .zip, AirDrop)──►  capture/  ──►  
 | --- | --- |
 | `apps/iphone/` | **iPhone app** (SwiftUI + ARKit): posed RGB + LiDAR depth + VIO points capture, zip export. See its README. |
 | `apps/macbook/` | **MacBook app** (SwiftUI + Metal): real-time 4DGS viewer, timeline, trajectory editor, rollout playback. See its README. |
-| `capture/` | Dataset loaders: ARKit captures, nuScenes (raw JSON tables), Waymo converter (experimental), generic log, synthetic world |
+| `capture/` | Dataset loaders: ARKit captures, KITTI raw, nuScenes (raw JSON tables), Waymo converter (experimental), generic log, synthetic world |
 | `core/reconstruct/` | 4DGS optimisation: init (LiDAR / VIO points / Depth Anything V2), Adam, L1+SSIM+depth, densify/prune |
 | `engine/metal_splat/` | Differentiable tile rasterizer: custom Metal forward/backward kernels (`shaders/*.metal`) on MLX unified-memory arrays |
 | `engine/scene_graph/` | Scene graph (background + rigid actor nodes), 4D Gaussians `(μ, Σ, α, SH, v, τ, σ_t)`, tracks, trajectory editor, box segmentation |
@@ -67,9 +67,22 @@ python scripts/eval_fidelity.py --scene checkpoints/scene_01.safetensors \
     --gt_scene data/sample_scene/gt_scene.safetensors --refiner checkpoints/flow_refiner.safetensors
 ```
 
-Real data: `--data_dir` also accepts an iPhone capture folder or `.zip` from `apps/iphone`, or a nuScenes root
-(`--nuscenes_scene scene-0061`). `--mono_depth` initialises handheld captures without LiDAR from Depth Anything V2,
-aligned to ARKit's metric VIO points (needs `pip install transformers torch pillow`).
+### Real data
+
+`--data_dir` accepts any of these:
+
+| Source | How |
+| --- | --- |
+| iPhone, live over Wi-Fi | MacBook app → **Live → Live Capture…** (⌘L), enable *Stream to Mac* in the iPhone app's Settings, record. The Mac re-assembles the capture as it arrives and **Reconstruct** runs `train_4dgs.py` and opens the result. Protocol: `docs/formats.md` §6 |
+| iPhone, USB cable | `python scripts/pull_iphone_captures.py` → `data/iphone/capture_*` |
+| iPhone, AirDrop | share the capture `.zip` from the app's Captures list; pass the `.zip` directly |
+| Any video (phone, dashcam, drone) | `python scripts/video_to_log.py clip.mp4 --out data/clip [--driving --camera_height 1.5]` (COLMAP SfM, `brew install colmap`) |
+| KITTI raw | unzip `<date>_calib.zip`, `<drive>_sync.zip`, `<drive>_tracklets.zip` into one folder → `--data_dir` that folder (`scripts/run_kitti_experiments.sh` runs the full study) |
+| nuScenes | the dataset root (`--nuscenes_scene scene-0061`) |
+| Waymo | convert with `python -m capture.waymo segment.tfrecord out_dir` (Linux) |
+
+Phones without LiDAR (e.g. iPhone 16): add `--mono_depth` to initialise from Depth Anything V2, scale-aligned to ARKit's
+metric VIO feature points (`pip install transformers torch pillow`).
 
 ### Perturbation language
 
@@ -91,26 +104,55 @@ Python entry point (`--no_edits` to ignore).
 
 ## Status
 
-Everything below was measured on an Apple M4 (16 GB) using the bundled synthetic sample scene (`make_sample_scene.py`:
-a procedurally generated Gaussian street with 3 moving cars, rendered into 101 posed RGB+depth frames). The real-data
-paths (iPhone capture, nuScenes, Waymo) are implemented but have **not** been run on real recordings yet.
+Measured on an Apple M4 (16 GB). Two kinds of data: the bundled **synthetic** sample scene (`make_sample_scene.py`: a
+procedurally generated Gaussian street with 3 moving cars and exact ground truth for every viewpoint) and **real**
+recordings: KITTI raw drive `2011_09_26_drive_0005` (camera + GPS/IMU + LiDAR + tracked objects), the same drive fed in
+as a plain dashcam MP4, and a 22-frame capture from the iPhone 16 app.
 
 ### Roadmap vs. project plan
 
 | Plan item | State |
 | --- | --- |
 | Custom Metal 4DGS forward/backward rasterizer | ✅ `engine/metal_splat` — forward matches a brute-force reference; backward matches MLX autodiff of a dense reference to 1e-3 |
-| iPhone ARKit VIO capture + Depth Anything V2 init | ✅ app builds and runs in the Simulator; loader round-trip tested. ⚠️ Not yet run on a physical iPhone; Depth Anything path not exercised (optional deps) |
-| nuScenes / Waymo loaders | ✅ nuScenes JSON loader written; ⚠️ untested without the dataset. Waymo converter is experimental (Linux-only deps) |
+| iPhone ARKit VIO capture + Depth Anything V2 init | ✅ app runs on an iPhone 16; a real capture reconstructs at 33.1 dB held-out; Depth Anything metric alignment validated against LiDAR (below) |
+| iPhone → Mac live link (Wi-Fi) | ✅ both sides built and tested against each other and a simulated phone (byte-identical captures). ⚠️ Not yet run phone-to-Mac over real Wi-Fi |
+| Driving logs | ✅ KITTI raw loader, tested on real data. ⚠️ nuScenes loader untested without the dataset; Waymo converter experimental (Linux-only deps) |
+| Any video → scene | ✅ COLMAP-based `video_to_log.py`, tested against KITTI GPS ground truth (below) |
 | MLX 2-step flow-matching refiner | ✅ trained on paired extrapolated-view renders; gains are modest (below) |
 | Closed-loop policy + 3-panel telemetry | ✅ expert, PilotNet (MLX) and red-teamer working end-to-end. ⚠️ openpilot `supercombo.onnx` adapter is untested (no weights bundled, needs onnxruntime) |
 | Metrics | ✅ depth AbsRel, E_warp, depth reprojection, collision/TTC/route. ❌ FVD not implemented (needs pretrained I3D) |
 | MacBook app (viewer + trajectory editor) | ✅ `swift build`/`swift test` pass, renders checkpoints identically to the Python renderer |
 
-### Reconstruction (`train_4dgs.py`, 7000 its, 512×288)
+### Real-data results
+
+**KITTI raw `2011_09_26_drive_0005`** (154 frames, city street, a moving van, cyclist, car and pedestrian; 640×193):
+
+| | Result |
+| --- | --- |
+| 4DGS reconstruction (LiDAR init, GPS/IMU poses, tracklet actors, 7000 its) | **22.9 dB** held-out PSNR (29.8 dB train), 687k Gaussians, 34 min |
+| Same drive as a plain **dashcam MP4** → `video_to_log.py` (COLMAP, camera-height prior only) | trajectory vs GPS/IMU: **3.3 % scale error**, ATE **0.74 m** RMSE metric (0.32 m after scale alignment) over 69 m |
+| Reconstruction from that video alone (no LiDAR / GPS / labels, 5000 its) | **23.5 dB** held-out — slightly *better* than the LiDAR+GPS version: SfM poses are self-consistent with the images |
+| Depth Anything V2 aligned to 150 sparse metric points/frame (stand-in for ARKit VIO), vs held-out LiDAR | **AbsRel 0.101, δ<1.25 = 91 %** |
+| Refiner trained on real frames (holdout mode) | no gain (21.34 → 21.33 dB): with one logged camera there is no ground truth at shifted viewpoints — real-world extrapolation needs multi-camera logs or synthetic pairs |
+| Closed loop, PilotNet trained in the KITTI sim (40 noisy-expert episodes) | nominal: full 15.7 s log, no collision, max lateral error 0.74 m. Step latency: raster 42 + refine 19 + policy 1.6 ms (687k Gaussians) |
+| Red-team (CEM, 144 rollouts: cut-ins, hard brakes, spawned obstacles, occlusion) | **7 failures (4.9 %)**, all lead-van hard brakes (4.6–5.1 m/s² at t≈5–7 s) |
+| DAgger on those failures | intervention rate on the 7 failures **100 % → 0 %**, on 20 fresh held-out scenarios **5 % → 0 %**; nominal driving unchanged |
+
+Collisions count only when the ego is at fault (nuPlan-style): replayed log agents are non-reactive, so one hitting the
+ego from behind is logged separately (`nonreactive_rear_hits`). The expert follows the logged speed profile so replayed
+agents stay plausible. When the ego leaves the logged corridor (e.g. stopping right behind the van), splats smear: the
+refiner does not fix that on real data yet.
+
+**iPhone 16** (the app, no LiDAR; a 9 s, 22-keyframe, ~74° handheld pan with 353 ARKit feature points): poses and
+intrinsics are photometrically consistent across frames, and the 4DGS reconstruction with `--mono_depth` reaches
+**33.1 dB** on held-out frames.
+
+### Synthetic scene
+
+#### Reconstruction (`train_4dgs.py`, 7000 its, 512×288)
 141k Gaussians, **44.1 dB PSNR on held-out frames**, 7 min (≈59 ms/iteration).
 
-### Fidelity at shifted viewpoints (`eval_fidelity.py`, vs ground truth, 15 frames)
+#### Fidelity at shifted viewpoints (`eval_fidelity.py`, vs ground truth, 15 frames)
 
 | Lateral shift | PSNR raw | PSNR refined | Depth AbsRel (4DGS) | E_warp raw / refined |
 | --- | --- | --- | --- | --- |
@@ -123,7 +165,7 @@ The refiner gains +0.6–0.8 dB at extrapolated views and costs 0.8 dB on the lo
 temporal warping error, and it doesn't remove large disocclusion smears. The metric depth it is conditioned on comes
 from the 4DGS buffer unchanged. A bigger model, longer training, or a latent-diffusion prior are the obvious next steps.
 
-### Closed loop & red-teaming (PilotNet on refined frames, 10 Hz)
+#### Closed loop & red-teaming (PilotNet on refined frames, 10 Hz)
 
 * Nominal and the plan's `actor_2:lateral_offset=-1.8m,t=2.5s` cut-in: no collision, max lateral error 0.10 m.
 * `redteam.py` (CEM, 132 rollouts): **22 failures (17%)**: lead-car hard brakes 11/36, spawned obstacles 11/12;
@@ -131,7 +173,7 @@ from the 4DGS buffer unchanged. A bigger model, longer training, or a latent-dif
 * `finetune_policy.py` (DAgger on those failures): intervention rate on the failure scenarios **100% → 0%** (these
   were also the fine-tuning scenarios), on 20 fresh held-out adversarial scenarios **10% → 0%** (small sample).
 
-### Latency @ 512×288 (P50)
+#### Latency @ 512×288 (P50)
 
 | Stage | Measured | Plan target |
 | --- | --- | --- |
