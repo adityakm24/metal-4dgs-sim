@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+logs/
+outputs/
+checkpoints/
+data/*
+!data/.gitkeep
+*.mp4
+.DS_Store
+apps/macbook/.build/
+apps/macbook/*.app
+apps/iphone/build/
+xcuserdata/
+DerivedData/

@@ -1,0 +1,9 @@
+mlx>=0.32
+numpy>=1.26
+opencv-python>=4.9
+scipy>=1.11
+pytest>=8
+# optional:
+#   transformers torch pillow   -> Depth Anything V2 monocular init (core/reconstruct/mono_depth.py)
+#   onnxruntime                 -> openpilot supercombo policy adapter
+#   waymo-open-dataset + tensorflow (Linux) -> capture/waymo.py converter

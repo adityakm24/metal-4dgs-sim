@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+*.app
+Fixtures/*.safetensors
+Fixtures/*.json
+Fixtures/*.png
+build/

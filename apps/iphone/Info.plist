@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>M4DGS Capture</string>
+	<key>NSCameraUsageDescription</key>
+	<string>M4DGS Capture uses the camera with ARKit to record posed images (and LiDAR depth when available) for 3D/4D Gaussian Splatting reconstruction.</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arkit</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UIStatusBarHidden</key>
+	<false/>
+</dict>
+</plist>

@@ -1,0 +1,21 @@
+[project]
+name = "metal-4dgs-sim"
+version = "0.1.0"
+description = "Metal/MLX 4D Gaussian Splatting + flow-matching closed-loop neural simulator"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["mlx>=0.32", "numpy>=1.26", "opencv-python>=4.9", "scipy>=1.11"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+monodepth = ["transformers", "torch", "pillow"]
+openpilot = ["onnxruntime"]
+
+[tool.setuptools.packages.find]
+include = ["capture*", "core*", "engine*", "models*", "eval*", "ui*"]
+
+[tool.setuptools.package-data]
+"engine.metal_splat" = ["shaders/*.metal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
